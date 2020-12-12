@@ -3,16 +3,25 @@
 #include <string.h>
 #include <xcb/xcb.h>
 
+const char* role_atom_name = "WM_WINDOW_ROLE";
 xcb_atom_t role_atom;
 
-void send_event_to_window_deep(xcb_connection_t* c, xcb_window_t win, int depth)
+static void send_event_to_window_deep(xcb_connection_t* c, xcb_window_t win, int depth)
 {
+    const char* class = "gwenview";
+    const int class_len = strlen(class);
+    const char* role = "MainWindow";
+    const int role_len = strlen(role);
+
     xcb_query_tree_cookie_t query_cookie;
     xcb_query_tree_reply_t* query_reply = NULL;
     xcb_get_property_cookie_t class_cookie;
     xcb_get_property_reply_t *class_reply = NULL;
     xcb_get_property_cookie_t role_cookie;
     xcb_get_property_reply_t *role_reply = NULL;
+
+    int has_role = 0;
+    int has_class = 0;
     int i;
 
     class_cookie = xcb_get_property(c, 0, win, XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 0, 8);
@@ -21,40 +30,34 @@ void send_event_to_window_deep(xcb_connection_t* c, xcb_window_t win, int depth)
 
     if ((class_reply = xcb_get_property_reply(c, class_cookie, NULL)))
     {
-	const char* class = "gwenview";
-	const int class_len = strlen(class);
-	if (xcb_get_property_value_length(class_reply) >= class_len
-	    && memcmp(class, xcb_get_property_value(class_reply), class_len) == 0)
-	{
-	    if ((role_reply = xcb_get_property_reply(c, role_cookie, NULL)))
-	    {
-		const char* role = "MainWindow";
-		const int role_len = strlen(role);
-
-		if (xcb_get_property_value_length(role_reply) >= role_len
-		    && memcmp(role, xcb_get_property_value(role_reply), role_len) == 0)
-		{
-		    printf("sending event to %d!\n", win);
-
-		    xcb_key_press_event_t event = { 0 };
-		    event.response_type = XCB_KEY_PRESS;
-		    event.detail = 113;
-		    event.root = win;
-		    event.event = win;
-		    event.state = XCB_NONE;
-		    event.same_screen = 1;
-
-		    xcb_send_event(c, 0, win, XCB_EVENT_MASK_KEY_PRESS, (char*)&event);
-		}
-
-		free(role_reply);
-	    }
-	}
+	has_class = (xcb_get_property_value_length(class_reply) >= class_len
+		     && memcmp(class, xcb_get_property_value(class_reply), class_len) == 0);
 	free(class_reply);
     }
 
-    query_reply = xcb_query_tree_reply(c, query_cookie, NULL);
-    if (query_reply)
+    if ((role_reply = xcb_get_property_reply(c, role_cookie, NULL)))
+    {
+	has_role = (xcb_get_property_value_length(role_reply) >= role_len
+		    && memcmp(role, xcb_get_property_value(role_reply), role_len) == 0);
+	free(role_reply);
+    }
+
+    if (has_class && has_role)
+    {
+	printf("sending event to %d!\n", win);
+
+	xcb_key_press_event_t event = { 0 };
+	event.response_type = XCB_KEY_PRESS;
+	event.detail = 113;
+	event.root = win;
+	event.event = win;
+	event.state = XCB_NONE;
+	event.same_screen = 1;
+
+	xcb_send_event(c, 0, win, XCB_EVENT_MASK_KEY_PRESS, (char*)&event);
+    }
+
+    if ((query_reply = xcb_query_tree_reply(c, query_cookie, NULL)))
     {
 	xcb_window_t* children = xcb_query_tree_children(query_reply);
 	for (i = 0; i < xcb_query_tree_children_length(query_reply); i++)
@@ -94,7 +97,6 @@ int main(int argc, char **argv)
     }
 
     screen = iter.data;
-    const char* role_atom_name = "WM_WINDOW_ROLE";
     atom_cookie = xcb_intern_atom(c, 0, strlen(role_atom_name), role_atom_name);
     if ((atom_reply = xcb_intern_atom_reply(c, atom_cookie, NULL)))
     {
