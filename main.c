@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <xcb/xcb.h>
 
 int main(int argc, char **argv)
@@ -51,7 +52,47 @@ int main(int argc, char **argv)
 		int len = xcb_get_property_value_length(prop_reply);
 		if (len > 0)
 		{
-		    printf("WM_CLASS is %.*s\n", len, (char*)xcb_get_property_value(prop_reply));
+		    const char* class = "gwenview";
+		    const int class_len = strlen(class);
+		    char* prop_string = (char*)xcb_get_property_value(prop_reply);
+		    printf("WM_CLASS is %.*s\n", len, prop_string);
+
+		    if (len >= class_len && memcmp(class, prop_string, class_len) == 0)
+		    {
+			xcb_get_geometry_reply_t *geo_reply = xcb_get_geometry_reply(c, xcb_get_geometry (c, children[i]), NULL);
+
+			if (!geo_reply)
+			{
+			    fprintf(stderr, "failure getting geometry reply\n");
+			    exit (1);
+			}
+
+			xcb_window_t win = children[i];
+			//xcb_window_t win = { 132120583 };
+
+			xcb_key_press_event_t event = { 0 };
+			xcb_void_cookie_t ev_cookie;
+			xcb_generic_error_t* ev_error;
+			event.response_type = XCB_KEY_PRESS;
+			event.detail = 113;
+			event.root = geo_reply->root;
+			event.event = win;
+			event.child = win;
+			event.state = XCB_NONE;
+			event.same_screen = 1;
+
+			printf("Class matches!\n");
+
+			ev_cookie = xcb_send_event(c, 0, win, XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY | XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT | XCB_EVENT_MASK_KEY_PRESS, (char*)&event);
+
+			ev_error = xcb_request_check(c, ev_cookie);
+			if (ev_error)
+			{
+			    fprintf(stderr, "Error sending request!\n");
+			}
+
+			free(geo_reply);
+		    }
 		}
 		free(prop_reply);
 	    }
