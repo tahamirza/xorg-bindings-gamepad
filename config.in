@@ -1,0 +1,47 @@
+ctrl main
+class krita
+
+# b
+BTN_DPAD_UP 56
+# ctrl+shift+a
+BTN_DPAD_DOWN 38 XCB_MOD_MASK_CONTROL|XCB_MOD_MASK_SHIFT
+# ctrl+t
+BTN_DPAD_RIGHT 37 XCB_MOD_MASK_CONTROL
+# ctrl+shift+alt+o
+BTN_DPAD_LEFT 32 XCB_MOD_MASK_CONTROL|XCB_MOD_MASK_SHIFT|XCB_MOD_MASK_1
+# /
+BTN_TL 61
+# ctrl z
+BTN_TL2 52 XCB_MOD_MASK_CONTROL
+# ctrl alt shift r
+BTN_SELECT 27 XCB_MOD_MASK_CONTROL|XCB_MOD_MASK_SHIFT|XCB_MOD_MASK_1
+# 5
+BTN_THUMBL 14
+# ctrl s
+BTN_Z 39 XCB_MOD_MASK_CONTROL
+# ]
+BTN_TR 35
+# [
+BTN_TR2 34
+
+deadzone 6000
+rumble off
+# ctrl ]
+ABS_X + 35 XCB_MOD_MASK_CONTROL
+# ctrl [
+ABS_X - 34 XCB_MOD_MASK_CONTROL
+# ctrl shift +
+ABS_Y + 21 XCB_MOD_MASK_CONTROL|XCB_MOD_MASK_SHIFT
+# ctrl -
+ABS_Y - 20 XCB_MOD_MASK_CONTROL
+
+ctrl imu
+class gwenview
+deadzone 3000
+hold 100
+rumble on
+
+# right
+ABS_RY + 114
+# left
+ABS_RY - 113

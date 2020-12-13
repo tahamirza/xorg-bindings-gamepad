@@ -12,6 +12,10 @@
 const char* role_atom_name = "WM_WINDOW_ROLE";
 xcb_atom_t role_atom;
 
+struct key_binding_t
+{
+};
+
 static void send_event_to_window_deep(xcb_connection_t* c, xcb_window_t win, int depth)
 {
     const char* class = "gwenview";
