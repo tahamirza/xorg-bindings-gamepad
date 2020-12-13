@@ -1,6 +1,6 @@
 #!/bin/awk -f
 
-BEGIN { print "struct key_binding_t bindings[] = {" }
+BEGIN { print "struct key_binding_t bindings[] = {"; ind = 0 }
 
 /EV_KEY/ { next }
 /EV_ABS/ { next }
@@ -10,19 +10,17 @@ BEGIN { print "struct key_binding_t bindings[] = {" }
 
 /ctrl/ {
     if (ctrl)
-	print "}, // END " ctrl
-
+	ictrl++
+    else
+	ictrl = 0
     ctrl = $2;
-    ibtn = 0;
-    iabs = 0;
-    print "// " $0
-    print "{"
+    print "// " $0, ictrl
 }
 
 /BTN/ {
-    # if (ibtn == 0)
-    # 	print "{ // btn_index"
-    print "// index " ibtn++
+    i = ind++
+    ctrls[ictrl]["EV_KEY"][$1][0] = i
+    print "// index " i
     print "// " $0
     print "{"
     print "\t.press_threshold = 1,"
@@ -38,12 +36,9 @@ BEGIN { print "struct key_binding_t bindings[] = {" }
 /hold/ { hold = $2 }
 
 /ABS/ {
-    if (ibtn) {
-	# print "} // END btn_index"
-	iabs = ibtn
-	ibtn = 0
-    }
-    print "// index " iabs++
+    i = ind++
+    ctrls[ictrl]["EV_ABS"][$1][$2] = i
+    print "// index " i
     print "// " $0
     print "{"
     print "\t.press_threshold = " $2 deadzone ","
@@ -58,10 +53,44 @@ BEGIN { print "struct key_binding_t bindings[] = {" }
 
 }
 
-#{ print $0 }
-
 END {
-    if (ctrl)
-	print "}, // END " ctrl
+    print "}"
+
+    print "static int find_matching_bindings(int32_t ctrl, uint16_t type, uint16_t code, int32_t ret[2])"
+    print "{"
+    print "\tswitch (ctrl)"
+    print "\t{"
+    for (c in ctrls) {
+	print "\tcase " c ":"
+	print "\t\tswitch (type)"
+	print "\t\t{"
+	for (t in ctrls[c]) {
+	    print "\t\tcase " t ":"
+	    print "\t\t\tswitch (code)"
+	    print "\t\t\t{"
+	    for (k in ctrls[c][t]) {
+		print "\t\t\tcase " k ":"
+		i = 0
+		for (b in ctrls[c][t][k]) {
+		    print "\t\t\t\tret[" i++ "] = " ctrls[c][t][k][b] ";"
+		}
+		print "\t\t\t\treturn " i ";"
+		print "\t\t\tbreak;"
+	    }
+	    print "\t\t\tdefault:"
+	    print "\t\t\tbreak;"
+	    print "\t\t\t}"
+	    print "\t\tbreak;"
+	}
+        print "\t\tdefault:"
+	print "\t\tbreak;"
+	print "\t\t}"
+	print "\tbreak;"
+    }
+    print "\tdefault:"
+    print "\tbreak;"
+    print "\t}"
+
+    print "return 0;"
     print "}"
 }
