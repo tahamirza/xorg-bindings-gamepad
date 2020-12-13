@@ -7,6 +7,7 @@
 #include <linux/input.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/epoll.h>
 
 const char* role_atom_name = "WM_WINDOW_ROLE";
 xcb_atom_t role_atom;
@@ -89,9 +90,11 @@ int main(int argc, char **argv)
     const char* device_path;
     struct input_event event;
     int dev_fd = -1;
+    int epoll_fd = -1;
 
     int i = 0;
     ssize_t read_result = 0;
+    int epoll_result = 0;
 
     if (argc != 2)
     {
@@ -136,8 +139,43 @@ int main(int argc, char **argv)
 	exit(1);
     }
 
+    if ((epoll_fd = epoll_create1(0)) == -1)
+    {
+	fprintf(stderr, "Could not initialize epoll context: %d\n", errno);
+	exit(1);
+    }
+
+    struct epoll_event epoll_event = { 0 };
+    epoll_event.events = EPOLLIN;
+    epoll_event.data.fd = dev_fd;
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, dev_fd, &epoll_event) == -1)
+    {
+	fprintf(stderr, "Could not add device fd to epoll context: %d\n", errno);
+	exit(1);
+    }
+
     for(;;)
     {
+	epoll_result = epoll_wait(epoll_fd, &epoll_event, 1, 100);
+
+	if (epoll_result == -1)
+	{
+	    fprintf(stderr, "Error waiting with epoll. %d\n", errno);
+	    break;
+	}
+
+	if (epoll_result == 0)
+	{
+	    printf("Epoll timed out.\n");
+	    continue;
+	}
+
+	if (!(epoll_event.events & EPOLLIN))
+	{
+	    fprintf(stderr, "Device fd is not readable. \n");
+	    break;
+	}
+
 	read_result = read(dev_fd, &event, sizeof event);
 
 	if (read_result == -1)
@@ -279,6 +317,7 @@ int main(int argc, char **argv)
 
 
     xcb_disconnect(c);
+    close(epoll_fd);
     close(dev_fd);
     udev_device_unref(device);
     udev_unref(udev);
