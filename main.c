@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
+#include <stdbool.h>
 #include <string.h>
 #include <xcb/xcb.h>
 #include <libudev.h>
@@ -14,7 +16,19 @@ xcb_atom_t role_atom;
 
 struct key_binding_t
 {
+    int32_t press_threshold;
+    int32_t release_threshold;
+    struct timespec last_press;
+    struct timespec last_release;
+    struct timespec last_activation;
+    uint32_t hold_threshold_ms;
+    uint32_t repeat_ms;
+    const char* window_class;
+    xcb_keycode_t keycode;
+    uint16_t keystate;
 };
+
+struct key_binding_t bindings[] = {};
 
 static void send_event_to_window_deep(xcb_connection_t* c, xcb_window_t win, int depth)
 {
@@ -30,8 +44,8 @@ static void send_event_to_window_deep(xcb_connection_t* c, xcb_window_t win, int
     xcb_get_property_cookie_t role_cookie;
     xcb_get_property_reply_t *role_reply = NULL;
 
-    int has_role = 0;
-    int has_class = 0;
+    bool has_role = false;
+    bool has_class = false;
     int i;
 
     class_cookie = xcb_get_property(c, 0, win, XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 0, 8);
