@@ -24,7 +24,7 @@ BTN_TR 35
 # [
 BTN_TR2 34
 
-deadzone 6000
+deadzone 20000
 rumble off
 # ctrl ]
 ABS_X + 35 XCB_MOD_MASK_CONTROL

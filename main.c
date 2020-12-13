@@ -18,9 +18,9 @@ struct key_binding_t
 {
     int32_t press_threshold;
     int32_t release_threshold;
-    struct timespec last_press;
-    struct timespec last_release;
-    struct timespec last_activation;
+    struct timeval last_press;
+    struct timeval last_release;
+    struct timeval last_activation;
     uint32_t hold_threshold_ms;
     uint32_t repeat_ms;
     const char* window_class;
@@ -89,6 +89,33 @@ static void send_event_to_window_deep(xcb_connection_t* c, xcb_window_t win, int
 	    send_event_to_window_deep(c, children[i], depth + 1);
 	}
 	free(query_reply);
+    }
+}
+
+static void process_binding_event(struct input_event* event, int32_t index)
+{
+    struct key_binding_t *binding = &bindings[index];
+
+    if (event->value > 0 && binding->press_threshold > 0)
+    {
+	if (event->value >= binding->press_threshold)
+	{
+	    printf("Button pressed! %d %d\n", binding->press_threshold, event->value);
+	    binding->last_press = event->time;
+	}
+    }
+    else if (event->value < 0 && binding->press_threshold < 0)
+    {
+	if (event->value <= binding->press_threshold)
+	{
+	    printf ("Button pressed! %d %d\n", binding->press_threshold, event->value);
+	    binding->last_press = event->time;
+	}
+    }
+    else
+    {
+	printf ("Button released!\n");
+	binding->last_release = event->time;
     }
 }
 
@@ -174,7 +201,7 @@ int main(int argc, char **argv)
 
     for(;;)
     {
-	int32_t bindings[2];
+	int32_t binding_indices[2];
 	int bindings_found;
 
 	epoll_result = epoll_wait(epoll_fd, &epoll_event, 1, 100);
@@ -187,7 +214,7 @@ int main(int argc, char **argv)
 
 	if (epoll_result == 0)
 	{
-	    printf("Epoll timed out.\n");
+	    // epoll timed out
 	    continue;
 	}
 
@@ -205,11 +232,11 @@ int main(int argc, char **argv)
 	    break;
 	}
 
-	bindings_found = find_matching_bindings(0, event.type, event.code, bindings);
+	bindings_found = find_matching_bindings(0, event.type, event.code, binding_indices);
 
 	for (i = 0; i < bindings_found; i++)
 	{
-	    printf("Found bindings for event: %d\n", bindings[i]);
+	    process_binding_event(&event, binding_indices[i]);
 	}
     }
 
