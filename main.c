@@ -28,7 +28,7 @@ struct key_binding_t
     uint16_t keystate;
 };
 
-struct key_binding_t bindings[] = {};
+#include "config.gen.inc.c"
 
 static void send_event_to_window_deep(xcb_connection_t* c, xcb_window_t win, int depth)
 {
@@ -174,6 +174,9 @@ int main(int argc, char **argv)
 
     for(;;)
     {
+	int32_t bindings[2];
+	int bindings_found;
+
 	epoll_result = epoll_wait(epoll_fd, &epoll_event, 1, 100);
 
 	if (epoll_result == -1)
@@ -202,105 +205,12 @@ int main(int argc, char **argv)
 	    break;
 	}
 
-	const char* type;
-	const char* code;
-	const char* status;
-	switch (event.type)
-	{
-	case EV_SYN:
-	    continue;
-	case EV_KEY:
-	    type = "key";
-	    status = event.value ? "down" : "up";
-	    switch (event.code)
-	    {
-	    case BTN_DPAD_UP:
-		code = "dpad_up";
-		break;
-	    case BTN_DPAD_DOWN:
-		code = "dpad_down";
-		break;
-	    case BTN_DPAD_LEFT:
-		code = "dpad_left";
-		break;
-	    case BTN_DPAD_RIGHT:
-		code = "dpad_right";
-		break;
-	    case BTN_TL:
-		code = "trigger_l1";
-		break;
-	    case BTN_TL2:
-		code = "trigger_l2";
-		break;
-	    case BTN_THUMBL:
-		code = "thumb_l";
-		break;
-	    case BTN_SELECT:
-		code = "select";
-		break;
-	    case BTN_Z:
-		code = "Z";
-		break;
-	    case BTN_TR:
-		code = "trigger_r1";
-		break;
-	    case BTN_TR2:
-		code = "trigger_r2";
-		break;
-	    default:
-		printf("Code: unknown %#x\n", event.code);
-		code = "unknown";
-		break;
-	    }
-	    break;
-	case EV_ABS:
-	    type = "analogue";
-	    switch (event.code)
-	    {
-	    case ABS_X:
-		code = "X";
-		break;
-	    case ABS_Y:
-		code = "Y";
-		break;
-	    case ABS_Z:
-		code = "Z";
-		break;
-	    case ABS_RX:
-		code = "RX";
-		break;
-	    case ABS_RY:
-		code = "RY";
-		break;
-	    case ABS_RZ:
-		code = "RZ";
-		break;
-	    default:
-		printf("Code: unknown %#x\n", event.code);
-		code = "unknown";
-		break;
-	    }
-	    if (event.value < 0)
-		status = "negative";
-	    else if (event.value > 0)
-		status = "positive";
-	    else
-		status = "normal";
-	    break;
-	case EV_MSC:
-	    type = "MSC";
-	    code = event.code == MSC_TIMESTAMP ? "timestamp" : "unknown";
-	    status = "a lot";
-	    break;
-	default:
-	    printf("Unknown event type: %#x, code: %#x, value: %#x\n", event.type, event.code, event.value);
-	    type = "idk";
-	    status = "idk";
-	    code = "idk";
-	    break;
-	}
+	bindings_found = find_matching_bindings(0, event.type, event.code, bindings);
 
-	printf("type: %s, code: %s, status: %s\n", type, code, status);
+	for (i = 0; i < bindings_found; i++)
+	{
+	    printf("Found bindings for event: %d\n", bindings[i]);
+	}
     }
 
     c = xcb_connect(NULL, &screen_num);

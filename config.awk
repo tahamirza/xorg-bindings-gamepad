@@ -54,7 +54,7 @@ BEGIN { print "struct key_binding_t bindings[] = {"; ind = 0 }
 }
 
 END {
-    print "}"
+    print "};"
 
     print "static int find_matching_bindings(int32_t ctrl, uint16_t type, uint16_t code, int32_t ret[2])"
     print "{"
