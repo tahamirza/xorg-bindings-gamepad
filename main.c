@@ -2,6 +2,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <xcb/xcb.h>
+#include <libudev.h>
+#include <errno.h>
+#include <linux/input.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 const char* role_atom_name = "WM_WINDOW_ROLE";
 xcb_atom_t role_atom;
@@ -77,7 +82,170 @@ int main(int argc, char **argv)
     xcb_screen_iterator_t iter;
     xcb_intern_atom_cookie_t atom_cookie;
     xcb_intern_atom_reply_t* atom_reply;
-    int i;
+
+    struct udev* udev = NULL;
+    struct udev_device* device = NULL;
+    const char* device_name;
+    const char* device_path;
+    struct input_event event;
+    int dev_fd = -1;
+
+    int i = 0;
+    ssize_t read_result = 0;
+
+    if (argc != 2)
+    {
+	fprintf(stderr, "Invalid number of arguments. Need exactly one.\n");
+	exit(1);
+    }
+
+    printf("%s\n", argv[1]);
+
+    udev = udev_new();
+
+    if (!udev)
+    {
+	fprintf(stderr, "Unable to create udev context.\n");
+	exit(1);
+    }
+
+    device = udev_device_new_from_syspath(udev, argv[1]);
+
+    if (!device)
+    {
+	fprintf(stderr, "Unable to open device from syspath: %d.\n", errno);
+	exit(1);
+    }
+
+    device_name = udev_device_get_property_value(udev_device_get_parent(device), "NAME");
+    device_path = udev_device_get_devnode(device);
+
+    if (device_name && device_path)
+    {
+	printf("Starting up to monitor %s on %s\n", device_name, device_path);
+    }
+    else
+    {
+	fprintf(stderr, "Could not get name of device.\n");
+	exit(1);
+    }
+
+    if ((dev_fd = open(device_path, O_RDONLY)) == -1)
+    {
+	fprintf(stderr, "Could not open device node: %d\n", errno);
+	exit(1);
+    }
+
+    for(;;)
+    {
+	read_result = read(dev_fd, &event, sizeof event);
+
+	if (read_result == -1)
+	{
+	    fprintf(stderr, "Error reading from device. %d\n", errno);
+	    break;
+	}
+
+	const char* type;
+	const char* code;
+	const char* status;
+	switch (event.type)
+	{
+	case EV_SYN:
+	    continue;
+	case EV_KEY:
+	    type = "key";
+	    status = event.value ? "down" : "up";
+	    switch (event.code)
+	    {
+	    case BTN_DPAD_UP:
+		code = "dpad_up";
+		break;
+	    case BTN_DPAD_DOWN:
+		code = "dpad_down";
+		break;
+	    case BTN_DPAD_LEFT:
+		code = "dpad_left";
+		break;
+	    case BTN_DPAD_RIGHT:
+		code = "dpad_right";
+		break;
+	    case BTN_TL:
+		code = "trigger_l1";
+		break;
+	    case BTN_TL2:
+		code = "trigger_l2";
+		break;
+	    case BTN_THUMBL:
+		code = "thumb_l";
+		break;
+	    case BTN_SELECT:
+		code = "select";
+		break;
+	    case BTN_Z:
+		code = "Z";
+		break;
+	    case BTN_TR:
+		code = "trigger_r1";
+		break;
+	    case BTN_TR2:
+		code = "trigger_r2";
+		break;
+	    default:
+		printf("Code: unknown %#x\n", event.code);
+		code = "unknown";
+		break;
+	    }
+	    break;
+	case EV_ABS:
+	    type = "analogue";
+	    switch (event.code)
+	    {
+	    case ABS_X:
+		code = "X";
+		break;
+	    case ABS_Y:
+		code = "Y";
+		break;
+	    case ABS_Z:
+		code = "Z";
+		break;
+	    case ABS_RX:
+		code = "RX";
+		break;
+	    case ABS_RY:
+		code = "RY";
+		break;
+	    case ABS_RZ:
+		code = "RZ";
+		break;
+	    default:
+		printf("Code: unknown %#x\n", event.code);
+		code = "unknown";
+		break;
+	    }
+	    if (event.value < 0)
+		status = "negative";
+	    else if (event.value > 0)
+		status = "positive";
+	    else
+		status = "normal";
+	    break;
+	case EV_MSC:
+	    type = "MSC";
+	    code = event.code == MSC_TIMESTAMP ? "timestamp" : "unknown";
+	    status = "a lot";
+	    break;
+	default:
+	    printf("Unknown event type: %#x, code: %#x, value: %#x\n", event.type, event.code, event.value);
+	    type = "idk";
+	    status = "idk";
+	    code = "idk";
+	    break;
+	}
+
+	printf("type: %s, code: %s, status: %s\n", type, code, status);
+    }
 
     c = xcb_connect(NULL, &screen_num);
 
@@ -109,6 +277,10 @@ int main(int argc, char **argv)
 	fprintf(stderr, "Could not intern window role atom.\n");
     }
 
+
     xcb_disconnect(c);
+    close(dev_fd);
+    udev_device_unref(device);
+    udev_unref(udev);
     return 0;
 }
