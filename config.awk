@@ -17,6 +17,9 @@ BEGIN { print "struct key_binding_t bindings[] = {"; ind = 0 }
     print "// " $0, ictrl
 }
 
+/delay/ { delay = $2 }
+/repeat/ { repeat = $2 }
+
 /BTN/ {
     i = ind++
     ctrls[ictrl]["EV_KEY"][$1][0] = i
@@ -25,6 +28,8 @@ BEGIN { print "struct key_binding_t bindings[] = {"; ind = 0 }
     print "{"
     print "\t.press_threshold = 1,"
     print "\t.release_threshold = 0,"
+    print "\t.repeat_ms = " repeat ","
+    print "\t.first_repeat_delay_ms = " delay ","
     print "\t.window_class = \"" class "\","
     print "\t.keycode = " $2 ","
     if ($3)
@@ -43,6 +48,8 @@ BEGIN { print "struct key_binding_t bindings[] = {"; ind = 0 }
     print "{"
     print "\t.press_threshold = " $2 deadzone ","
     print "\t.release_threshold = " $2 deadzone ","
+    print "\t.repeat_ms = " repeat ","
+    print "\t.first_repeat_delay_ms = " delay ","
     print "\t.window_class = \"" class "\","
     print "\t.keycode = " $3 ","
     if ($4)

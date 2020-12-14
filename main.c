@@ -60,9 +60,11 @@ struct key_binding_t
     int32_t release_threshold;
     struct timespec first_press;
     struct timespec last_release;
+    struct timespec first_activation;
     struct timespec last_activation;
-    uint32_t hold_threshold_ms;
-    uint32_t repeat_ms;
+    int32_t hold_threshold_ms;
+    int32_t repeat_ms;
+    int32_t first_repeat_delay_ms;
     const char* window_class;
     xcb_keycode_t keycode;
     uint16_t keystate;
@@ -170,31 +172,58 @@ static void process_binding_event(struct input_event* event, int32_t index)
     binding->last_release = curr_time;
 }
 
-static bool is_binding_pending(struct key_binding_t* binding)
+static bool is_binding_pending(struct key_binding_t* binding, bool* first)
 {
     struct timespec curr_time;
-    struct timespec activation_diff;
-    clock_gettime(CLOCK_MONOTONIC, &curr_time);
+    struct timespec last_activation_diff;
+    struct timespec first_activation_diff;
 
-    timespecsub(&curr_time, &binding->last_activation, &activation_diff);
+    *first = false;
 
-    if (timespeccmp(&binding->first_press, &binding->last_release, >)
-	&& timespeccmp(&binding->first_press, &binding->last_activation, >))
+    if (timespeccmp(&binding->first_press, &binding->last_release, >))
     {
-	printf("There is a binding pending!\n");
-	return true;
+	if (timespeccmp(&binding->first_press, &binding->last_activation, >))
+	{
+	    printf("There is a binding pending for the first press!\n");
+	    *first = true;
+	    return true;
+	}
+
+	clock_gettime(CLOCK_MONOTONIC, &curr_time);
+	timespecsub(&curr_time, &binding->first_activation, &first_activation_diff);
+
+	int32_t diff_ms = (first_activation_diff.tv_sec * 1000) + (first_activation_diff.tv_nsec / 1000000);
+
+	if (diff_ms < binding->first_repeat_delay_ms)
+	{
+	    return false;
+	}
+
+	timespecsub(&curr_time, &binding->last_activation, &last_activation_diff);
+	diff_ms = (last_activation_diff.tv_sec * 1000) + (last_activation_diff.tv_nsec / 1000000);
+
+	if (diff_ms >= binding->repeat_ms)
+	{
+	    printf("A binding has been pending for %d ms\n", diff_ms);
+	    return true;
+	}
     }
 
     return false;
 }
 
-static void fire_binding(struct key_binding_t* binding)
+static void fire_binding(struct key_binding_t* binding, bool first)
 {
     struct timespec curr_time;
     clock_gettime(CLOCK_MONOTONIC, &curr_time);
 
     printf("Firing binding!\n");
     binding->last_activation = curr_time;
+
+    if (first)
+    {
+	binding->first_activation = curr_time;
+    }
 
     send_event_to_window_deep(screen->root, binding->window_class, binding->keycode, binding->keystate);
 }
@@ -208,9 +237,10 @@ static void fire_pending_bindings()
 
     for (i = 0; i < num_bindings; i++)
     {
-	if (is_binding_pending(&bindings[i]))
+	bool first = false;
+	if (is_binding_pending(&bindings[i], &first))
 	{
-	    fire_binding(&bindings[i]);
+	    fire_binding(&bindings[i], first);
 	}
     }
 }
@@ -331,7 +361,7 @@ int main(int argc, char **argv)
 
 	fire_pending_bindings();
 
-	epoll_result = epoll_wait(epoll_fd, &epoll_event, 1, 100);
+	epoll_result = epoll_wait(epoll_fd, &epoll_event, 1, 25);
 
 	if (epoll_result == -1)
 	{

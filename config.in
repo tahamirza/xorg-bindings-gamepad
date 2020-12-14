@@ -1,3 +1,6 @@
+delay 500
+repeat 50
+
 ctrl main
 class krita
 
