@@ -114,8 +114,6 @@ static void send_event_to_window_deep(xcb_window_t win, const char* class, xcb_k
 
     if (has_class && has_role)
     {
-	printf("sending press event to %d!\n", win);
-
 	xcb_key_press_event_t event = { 0 };
 	event.response_type = XCB_KEY_PRESS;
 	event.detail = keycode;
@@ -153,7 +151,6 @@ static void process_binding_event(struct input_event* event, int32_t index)
 	{
 	    if (timespeccmp(&binding->first_press, &binding->last_release, <=))
 	    {
-		printf("Button pressed! %d %d\n", binding->press_threshold, event->value);
 		binding->first_press = curr_time;
 	    }
 	    return;
@@ -166,14 +163,12 @@ static void process_binding_event(struct input_event* event, int32_t index)
 	{
 	    if (timespeccmp(&binding->first_press, &binding->last_release, <=))
 	    {
-		printf("Button pressed! %d %d\n", binding->press_threshold, event->value);
 		binding->first_press = curr_time;
 	    }
 	    return;
 	}
     }
     
-    printf ("Button released! %d %d\n", binding->press_threshold, event->value);
     binding->last_release = curr_time;
 }
 
@@ -204,8 +199,6 @@ static bool is_binding_pending(struct key_binding_t* binding, bool* first)
 		}
 	    }
 
-
-	    printf("There is a binding pending for the first press!\n");
 	    *first = true;
 	    return true;
 	}
@@ -224,7 +217,6 @@ static bool is_binding_pending(struct key_binding_t* binding, bool* first)
 
 	if (diff_ms >= binding->repeat_ms)
 	{
-	    printf("A binding has been pending for %d ms\n", diff_ms);
 	    return true;
 	}
     }
@@ -234,18 +226,18 @@ static bool is_binding_pending(struct key_binding_t* binding, bool* first)
 
 static void play_rumble()
 {
+    if (rumble_fd == -1)
+    {
+	return;
+    }
+    
     struct input_event rumble_event = { 0 };
-    ssize_t write_result;
     rumble_event.type = EV_FF;
     rumble_event.code = rumble_effect_id;
     rumble_event.value = 1;
-    printf("Trying to play effect...\n");
-    write_result = write(rumble_fd, &rumble_event, sizeof rumble_event);
-    printf("Rumble write result: %ld\n", write_result);
-
-    printf("Stopping effect.\n");
+    write(rumble_fd, &rumble_event, sizeof rumble_event);
     rumble_event.value = 0;
-    write_result = write(rumble_fd, &rumble_event, sizeof rumble_event);
+    write(rumble_fd, &rumble_event, sizeof rumble_event);
 }
 
 static void fire_binding(struct key_binding_t* binding, bool first)
@@ -253,7 +245,6 @@ static void fire_binding(struct key_binding_t* binding, bool first)
     struct timespec curr_time;
     clock_gettime(CLOCK_MONOTONIC, &curr_time);
 
-    printf("Firing binding!\n");
     binding->last_activation = curr_time;
 
     if (first)
@@ -273,8 +264,6 @@ static void fire_pending_bindings()
 {
     int num_bindings = sizeof bindings / sizeof bindings[0];
     int i;
-
-    printf("Number of bindings: %d\n", num_bindings);
 
     for (i = 0; i < num_bindings; i++)
     {
@@ -437,32 +426,23 @@ int main(int argc, char **argv)
 	    exit (1);
 	}
 
+	struct ff_effect effect = { 0 };
+	effect.id = -1;
+	effect.type = FF_RUMBLE;
+	effect.u.rumble.strong_magnitude = USHRT_MAX / 2;
+	printf("Trying to add rumble effect...\n");
+	if (ioctl(rumble_fd, EVIOCSFF, &effect) == -1)
+	{
+	    fprintf(stderr, "Could not add rumble effect! %d %s\n", errno, strerror(errno));
+	    exit (1);
+	}
+
+	rumble_effect_id = effect.id;
+	printf("Added rumble effect %d\n", rumble_effect_id);
+
 	udev_enumerate_unref(monitor);
 	udev_device_unref(rumble_device);
     }
-    else
-    {
-	rumble_fd = open(device_path, O_WRONLY);
-
-	if (rumble_fd == -1)
-	{
-	    fprintf(stderr, "Could not open ourselves for rumble! %s\n", strerror(errno));
-	    exit (1);
-	}
-    }
-
-    struct ff_effect effect = { 0 };
-    effect.id = -1;
-    effect.type = FF_RUMBLE;
-    effect.u.rumble.strong_magnitude = USHRT_MAX / 2;
-    printf("Trying to add rumble effect...\n");
-    if (ioctl(rumble_fd, EVIOCSFF, &effect) == -1)
-    {
-	fprintf(stderr, "Could not add rumble effect! %d %s\n", errno, strerror(errno));
-	exit (1);
-    }
-
-    rumble_effect_id = effect.id;
 
     if ((epoll_fd = epoll_create1(0)) == -1)
     {
@@ -555,7 +535,12 @@ int main(int argc, char **argv)
 
 
     xcb_disconnect(c);
-    close(rumble_fd);
+
+    if (rumble_fd != -1)
+    {
+	close(rumble_fd);
+    }
+
     close(epoll_fd);
     close(dev_fd);
     udev_device_unref(device);
