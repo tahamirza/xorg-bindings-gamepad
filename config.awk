@@ -19,6 +19,7 @@ BEGIN { print "struct key_binding_t bindings[] = {"; ind = 0 }
 
 /delay/ { delay = $2 }
 /repeat/ { repeat = $2 }
+/rumble/ { rumble = $2 }
 
 /BTN/ {
     i = ind++
@@ -56,6 +57,8 @@ BEGIN { print "struct key_binding_t bindings[] = {"; ind = 0 }
 	print "\t.keystate = " $4 ","
     if (hold)
 	print "\t.hold_threshold_ms = " hold ","
+    if (rumble == "on")
+	print "\t.rumble = true,"
     print "},"
 
 }

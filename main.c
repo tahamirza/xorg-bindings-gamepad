@@ -10,6 +10,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/epoll.h>
+#include <sys/ioctl.h>
+#include <limits.h>
 
 /* stolen from bsd's time.h */
 /* Operations on timespecs */
@@ -53,6 +55,8 @@ xcb_connection_t *c = NULL;
 xcb_screen_t *screen = NULL;
 const char* role_atom_name = "WM_WINDOW_ROLE";
 xcb_atom_t role_atom;
+int rumble_effect_id = -1;
+int rumble_fd = -1;
 
 struct key_binding_t
 {
@@ -68,6 +72,7 @@ struct key_binding_t
     const char* window_class;
     xcb_keycode_t keycode;
     uint16_t keystate;
+    bool rumble;
 };
 
 #include "config.gen.inc.c"
@@ -227,6 +232,22 @@ static bool is_binding_pending(struct key_binding_t* binding, bool* first)
     return false;
 }
 
+static void play_rumble()
+{
+    struct input_event rumble_event = { 0 };
+    ssize_t write_result;
+    rumble_event.type = EV_FF;
+    rumble_event.code = rumble_effect_id;
+    rumble_event.value = 1;
+    printf("Trying to play effect...\n");
+    write_result = write(rumble_fd, &rumble_event, sizeof rumble_event);
+    printf("Rumble write result: %ld\n", write_result);
+
+    printf("Stopping effect.\n");
+    rumble_event.value = 0;
+    write_result = write(rumble_fd, &rumble_event, sizeof rumble_event);
+}
+
 static void fire_binding(struct key_binding_t* binding, bool first)
 {
     struct timespec curr_time;
@@ -238,6 +259,11 @@ static void fire_binding(struct key_binding_t* binding, bool first)
     if (first)
     {
 	binding->first_activation = curr_time;
+    }
+
+    if (binding->rumble)
+    {
+	play_rumble();
     }
 
     send_event_to_window_deep(screen->root, binding->window_class, binding->keycode, binding->keystate);
@@ -325,6 +351,118 @@ int main(int argc, char **argv)
 	fprintf(stderr, "Could not open device node: %d\n", errno);
 	exit(1);
     }
+
+    if (is_imu)
+    {
+	struct udev_enumerate* monitor;
+	struct udev_list_entry* dev_list;
+	printf("We are imu. Trying to find main device so we can use the rumble...\n");
+	monitor = udev_enumerate_new(udev);
+	if (monitor == NULL)
+	{
+	    fprintf(stderr, "Could not open udev monitor.\n");
+	    exit (1);
+	}
+
+	if (udev_enumerate_add_match_parent(monitor, udev_device_get_parent(udev_device_get_parent(device))) < 0)
+	{
+	    fprintf(stderr, "Could not add udev match for parent's parent.\n");
+	    exit (1);
+	}
+
+	if (udev_enumerate_add_match_subsystem(monitor, "input") < 0)
+	{
+	    fprintf(stderr, "Could not add udev match for input subsystem.\n");
+	    exit (1);
+	}
+
+	if (udev_enumerate_add_match_sysname(monitor, "event*") < 0)
+	{
+	    fprintf(stderr, "Could not add udev match for event* sysname\n");
+	    exit (1);
+	}
+
+	if (udev_enumerate_scan_devices(monitor) < 0)
+	{
+	    fprintf(stderr, "Device scan failed.\n");
+	    exit (1);
+	}
+
+	dev_list = udev_enumerate_get_list_entry(monitor);
+
+	if (dev_list == NULL)
+	{
+	    fprintf(stderr, "Device scan returned no devices.\n");
+	    exit (1);
+	}
+
+	const char* rumble_sys_path = NULL;
+	while (dev_list)
+	{
+	    rumble_sys_path = udev_list_entry_get_name(dev_list);
+	    if (strcmp(rumble_sys_path, argv[1]) == 0)
+	    {
+		printf("Found ourselves!\n");
+		rumble_sys_path = NULL;
+	    }
+	    else
+	    {
+		printf("Found a potential rumble source: %s\n", rumble_sys_path);
+		break;
+	    }
+	    dev_list = udev_list_entry_get_next(dev_list);
+	}
+
+	if (rumble_sys_path == NULL)
+	{
+	    fprintf(stderr, "Could not find any rumble sources.\n");
+	    exit (1);
+	}
+
+	struct udev_device* rumble_device = udev_device_new_from_syspath(udev, rumble_sys_path);
+
+	if (rumble_device == NULL)
+	{
+	    fprintf(stderr, "Unable to open rumble device from syspath. %s\n", strerror(errno));
+	    exit (1);
+	}
+
+	const char* rumble_dev_path = udev_device_get_devnode(rumble_device);
+
+	rumble_fd = open(rumble_dev_path, O_WRONLY);
+
+	if (rumble_fd == -1)
+	{
+	    fprintf(stderr, "Could not open the rumble source device. %s\n", strerror(errno));
+	    exit (1);
+	}
+
+	udev_enumerate_unref(monitor);
+	udev_device_unref(rumble_device);
+    }
+    else
+    {
+	rumble_fd = open(device_path, O_WRONLY);
+
+	if (rumble_fd == -1)
+	{
+	    fprintf(stderr, "Could not open ourselves for rumble! %s\n", strerror(errno));
+	    exit (1);
+	}
+    }
+
+    struct ff_effect effect = { 0 };
+    effect.id = -1;
+    effect.type = FF_RUMBLE;
+    effect.u.rumble.strong_magnitude = USHRT_MAX / 2;
+    printf("Trying to add rumble effect...\n");
+    if (ioctl(rumble_fd, EVIOCSFF, &effect) == -1)
+    {
+	fprintf(stderr, "Could not add rumble effect! %d %s\n", errno, strerror(errno));
+	exit (1);
+    }
+
+    rumble_effect_id = effect.id;
 
     if ((epoll_fd = epoll_create1(0)) == -1)
     {
@@ -417,6 +555,7 @@ int main(int argc, char **argv)
 
 
     xcb_disconnect(c);
+    close(rumble_fd);
     close(epoll_fd);
     close(dev_fd);
     udev_device_unref(device);
