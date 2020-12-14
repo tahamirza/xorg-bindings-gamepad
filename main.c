@@ -11,6 +11,46 @@
 #include <unistd.h>
 #include <sys/epoll.h>
 
+/* stolen from bsd's time.h */
+/* Operations on timespecs */
+#define	timespecclear(tvp)	((tvp)->tv_sec = (tvp)->tv_nsec = 0)
+#define	timespecisset(tvp)	((tvp)->tv_sec || (tvp)->tv_nsec)
+#define	timespeccmp(tvp, uvp, cmp)					\
+	(((tvp)->tv_sec == (uvp)->tv_sec) ?				\
+	    ((tvp)->tv_nsec cmp (uvp)->tv_nsec) :			\
+	    ((tvp)->tv_sec cmp (uvp)->tv_sec))
+
+#define	timespecadd(tsp, usp, vsp)					\
+	do {								\
+		(vsp)->tv_sec = (tsp)->tv_sec + (usp)->tv_sec;		\
+		(vsp)->tv_nsec = (tsp)->tv_nsec + (usp)->tv_nsec;	\
+		if ((vsp)->tv_nsec >= 1000000000L) {			\
+			(vsp)->tv_sec++;				\
+			(vsp)->tv_nsec -= 1000000000L;			\
+		}							\
+	} while (0)
+#define	timespecsub(tsp, usp, vsp)					\
+	do {								\
+		(vsp)->tv_sec = (tsp)->tv_sec - (usp)->tv_sec;		\
+		(vsp)->tv_nsec = (tsp)->tv_nsec - (usp)->tv_nsec;	\
+		if ((vsp)->tv_nsec < 0) {				\
+			(vsp)->tv_sec--;				\
+			(vsp)->tv_nsec += 1000000000L;			\
+		}							\
+	} while (0)
+
+/* Operations on timevals. */
+
+#define	timevalclear(tvp)		((tvp)->tv_sec = (tvp)->tv_usec = 0)
+#define	timevalisset(tvp)		((tvp)->tv_sec || (tvp)->tv_usec)
+#define	timevalcmp(tvp, uvp, cmp)					\
+	(((tvp)->tv_sec == (uvp)->tv_sec) ?				\
+	    ((tvp)->tv_usec cmp (uvp)->tv_usec) :			\
+	    ((tvp)->tv_sec cmp (uvp)->tv_sec))
+
+
+xcb_connection_t *c = NULL;
+xcb_screen_t *screen = NULL;
 const char* role_atom_name = "WM_WINDOW_ROLE";
 xcb_atom_t role_atom;
 
@@ -18,9 +58,9 @@ struct key_binding_t
 {
     int32_t press_threshold;
     int32_t release_threshold;
-    struct timeval last_press;
-    struct timeval last_release;
-    struct timeval last_activation;
+    struct timespec first_press;
+    struct timespec last_release;
+    struct timespec last_activation;
     uint32_t hold_threshold_ms;
     uint32_t repeat_ms;
     const char* window_class;
@@ -30,9 +70,8 @@ struct key_binding_t
 
 #include "config.gen.inc.c"
 
-static void send_event_to_window_deep(xcb_connection_t* c, xcb_window_t win, int depth)
+static void send_event_to_window_deep(xcb_window_t win, const char* class, xcb_keycode_t keycode, uint16_t keystate)
 {
-    const char* class = "gwenview";
     const int class_len = strlen(class);
     const char* role = "MainWindow";
     const int role_len = strlen(role);
@@ -68,17 +107,20 @@ static void send_event_to_window_deep(xcb_connection_t* c, xcb_window_t win, int
 
     if (has_class && has_role)
     {
-	printf("sending event to %d!\n", win);
+	printf("sending press event to %d!\n", win);
 
 	xcb_key_press_event_t event = { 0 };
 	event.response_type = XCB_KEY_PRESS;
-	event.detail = 113;
+	event.detail = keycode;
 	event.root = win;
 	event.event = win;
-	event.state = XCB_NONE;
+	event.state = keystate;
 	event.same_screen = 1;
 
 	xcb_send_event(c, 0, win, XCB_EVENT_MASK_KEY_PRESS, (char*)&event);
+
+	event.response_type = XCB_KEY_RELEASE;
+	xcb_send_event(c, 0, win, XCB_EVENT_MASK_KEY_RELEASE, (char*)&event);
     }
 
     if ((query_reply = xcb_query_tree_reply(c, query_cookie, NULL)))
@@ -86,7 +128,7 @@ static void send_event_to_window_deep(xcb_connection_t* c, xcb_window_t win, int
 	xcb_window_t* children = xcb_query_tree_children(query_reply);
 	for (i = 0; i < xcb_query_tree_children_length(query_reply); i++)
 	{
-	    send_event_to_window_deep(c, children[i], depth + 1);
+	    send_event_to_window_deep(children[i], class, keycode, keystate);
 	}
 	free(query_reply);
     }
@@ -94,35 +136,87 @@ static void send_event_to_window_deep(xcb_connection_t* c, xcb_window_t win, int
 
 static void process_binding_event(struct input_event* event, int32_t index)
 {
+    struct timespec curr_time;
+    clock_gettime(CLOCK_MONOTONIC, &curr_time);
     struct key_binding_t *binding = &bindings[index];
 
     if (event->value > 0 && binding->press_threshold > 0)
     {
 	if (event->value >= binding->press_threshold)
 	{
-	    printf("Button pressed! %d %d\n", binding->press_threshold, event->value);
-	    binding->last_press = event->time;
+	    if (timespeccmp(&binding->first_press, &binding->last_release, <=))
+	    {
+		printf("Button pressed! %d %d\n", binding->press_threshold, event->value);
+		binding->first_press = curr_time;
+	    }
+	    return;
 	}
     }
-    else if (event->value < 0 && binding->press_threshold < 0)
+    
+    if (event->value < 0 && binding->press_threshold < 0)
     {
 	if (event->value <= binding->press_threshold)
 	{
-	    printf ("Button pressed! %d %d\n", binding->press_threshold, event->value);
-	    binding->last_press = event->time;
+	    if (timespeccmp(&binding->first_press, &binding->last_release, <=))
+	    {
+		printf("Button pressed! %d %d\n", binding->press_threshold, event->value);
+		binding->first_press = curr_time;
+	    }
+	    return;
 	}
     }
-    else
+    
+    printf ("Button released! %d %d\n", binding->press_threshold, event->value);
+    binding->last_release = curr_time;
+}
+
+static bool is_binding_pending(struct key_binding_t* binding)
+{
+    struct timespec curr_time;
+    struct timespec activation_diff;
+    clock_gettime(CLOCK_MONOTONIC, &curr_time);
+
+    timespecsub(&curr_time, &binding->last_activation, &activation_diff);
+
+    if (timespeccmp(&binding->first_press, &binding->last_release, >)
+	&& timespeccmp(&binding->first_press, &binding->last_activation, >))
     {
-	printf ("Button released!\n");
-	binding->last_release = event->time;
+	printf("There is a binding pending!\n");
+	return true;
+    }
+
+    return false;
+}
+
+static void fire_binding(struct key_binding_t* binding)
+{
+    struct timespec curr_time;
+    clock_gettime(CLOCK_MONOTONIC, &curr_time);
+
+    printf("Firing binding!\n");
+    binding->last_activation = curr_time;
+
+    send_event_to_window_deep(screen->root, binding->window_class, binding->keycode, binding->keystate);
+}
+
+static void fire_pending_bindings()
+{
+    int num_bindings = sizeof bindings / sizeof bindings[0];
+    int i;
+
+    printf("Number of bindings: %d\n", num_bindings);
+
+    for (i = 0; i < num_bindings; i++)
+    {
+	if (is_binding_pending(&bindings[i]))
+	{
+	    fire_binding(&bindings[i]);
+	}
     }
 }
 
 int main(int argc, char **argv)
 {
-    xcb_connection_t *c = NULL;
-    xcb_screen_t *screen = NULL;
     int screen_num = 0;
     const xcb_setup_t *setup;
     xcb_screen_iterator_t iter;
@@ -199,10 +293,43 @@ int main(int argc, char **argv)
 	exit(1);
     }
 
+    c = xcb_connect(NULL, &screen_num);
+
+    if (c == NULL)
+    {
+	fprintf(stderr, "Unable to open XCB display.\n");
+	exit(1);
+    }
+
+    setup = xcb_get_setup(c);
+
+    iter = xcb_setup_roots_iterator(setup);
+
+    for (i = 0; i < screen_num; i++)
+    {
+	xcb_screen_next(&iter);
+    }
+
+    screen = iter.data;
+    atom_cookie = xcb_intern_atom(c, 0, strlen(role_atom_name), role_atom_name);
+    if ((atom_reply = xcb_intern_atom_reply(c, atom_cookie, NULL)))
+    {
+	role_atom = atom_reply->atom;
+	free(atom_reply);
+	
+    }
+    else
+    {
+	fprintf(stderr, "Could not intern window role atom.\n");
+	exit (1);
+    }
+
     for(;;)
     {
 	int32_t binding_indices[2];
 	int bindings_found;
+
+	fire_pending_bindings();
 
 	epoll_result = epoll_wait(epoll_fd, &epoll_event, 1, 100);
 
@@ -238,36 +365,6 @@ int main(int argc, char **argv)
 	{
 	    process_binding_event(&event, binding_indices[i]);
 	}
-    }
-
-    c = xcb_connect(NULL, &screen_num);
-
-    if (c == NULL)
-    {
-	fprintf(stderr, "Unable to open XCB display.\n");
-	exit(1);
-    }
-
-    setup = xcb_get_setup(c);
-
-    iter = xcb_setup_roots_iterator(setup);
-
-    for (i = 0; i < screen_num; i++)
-    {
-	xcb_screen_next(&iter);
-    }
-
-    screen = iter.data;
-    atom_cookie = xcb_intern_atom(c, 0, strlen(role_atom_name), role_atom_name);
-    if ((atom_reply = xcb_intern_atom_reply(c, atom_cookie, NULL)))
-    {
-	role_atom = atom_reply->atom;
-	free(atom_reply);
-	send_event_to_window_deep(c, screen->root, 0);
-    }
-    else
-    {
-	fprintf(stderr, "Could not intern window role atom.\n");
     }
 
 
