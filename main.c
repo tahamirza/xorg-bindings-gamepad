@@ -175,24 +175,39 @@ static void process_binding_event(struct input_event* event, int32_t index)
 static bool is_binding_pending(struct key_binding_t* binding, bool* first)
 {
     struct timespec curr_time;
+    struct timespec first_press_diff;
     struct timespec last_activation_diff;
     struct timespec first_activation_diff;
+    int32_t diff_ms;
 
     *first = false;
 
     if (timespeccmp(&binding->first_press, &binding->last_release, >))
     {
+	clock_gettime(CLOCK_MONOTONIC, &curr_time);
+
 	if (timespeccmp(&binding->first_press, &binding->last_activation, >))
 	{
+	    if (binding->hold_threshold_ms > 0)
+	    {
+		timespecsub(&curr_time, &binding->first_press, &first_press_diff);
+		diff_ms = (first_press_diff.tv_sec * 1000) + (first_press_diff.tv_nsec / 1000000);
+
+		if (diff_ms < binding->hold_threshold_ms)
+		{
+		    return false;
+		}
+	    }
+
+
 	    printf("There is a binding pending for the first press!\n");
 	    *first = true;
 	    return true;
 	}
 
-	clock_gettime(CLOCK_MONOTONIC, &curr_time);
 	timespecsub(&curr_time, &binding->first_activation, &first_activation_diff);
 
-	int32_t diff_ms = (first_activation_diff.tv_sec * 1000) + (first_activation_diff.tv_nsec / 1000000);
+	diff_ms = (first_activation_diff.tv_sec * 1000) + (first_activation_diff.tv_nsec / 1000000);
 
 	if (diff_ms < binding->first_repeat_delay_ms)
 	{
@@ -260,6 +275,7 @@ int main(int argc, char **argv)
     struct input_event event;
     int dev_fd = -1;
     int epoll_fd = -1;
+    bool is_imu;
 
     int i = 0;
     ssize_t read_result = 0;
@@ -301,6 +317,8 @@ int main(int argc, char **argv)
 	fprintf(stderr, "Could not get name of device.\n");
 	exit(1);
     }
+
+    is_imu = (strstr(device_name, "IMU") != NULL);
 
     if ((dev_fd = open(device_path, O_RDONLY)) == -1)
     {
@@ -389,7 +407,7 @@ int main(int argc, char **argv)
 	    break;
 	}
 
-	bindings_found = find_matching_bindings(0, event.type, event.code, binding_indices);
+	bindings_found = find_matching_bindings(is_imu, event.type, event.code, binding_indices);
 
 	for (i = 0; i < bindings_found; i++)
 	{

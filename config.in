@@ -1,5 +1,6 @@
 delay 500
 repeat 50
+hold 0
 
 ctrl main
 class krita
@@ -45,6 +46,6 @@ hold 100
 rumble on
 
 # right
-ABS_RY + 114
+ABS_Y + 114
 # left
-ABS_RY - 113
+ABS_Y - 113
