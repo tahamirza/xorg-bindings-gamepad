@@ -56,7 +56,7 @@ xcb_screen_t *screen = NULL;
 const char* role_atom_name = "WM_WINDOW_ROLE";
 xcb_atom_t role_atom;
 int rumble_effect_id = -1;
-int rumble_fd = -1;
+int dev_fd = -1;
 int led_fd[4] = { -1, -1, -1, -1 };
 int cur_set = 1;
 
@@ -231,7 +231,7 @@ static bool is_binding_pending(struct key_binding_t* binding, bool* first)
 
 static void play_rumble()
 {
-    if (rumble_fd == -1)
+    if (dev_fd == -1)
     {
 	return;
     }
@@ -240,9 +240,9 @@ static void play_rumble()
     rumble_event.type = EV_FF;
     rumble_event.code = rumble_effect_id;
     rumble_event.value = 1;
-    write(rumble_fd, &rumble_event, sizeof rumble_event);
+    write(dev_fd, &rumble_event, sizeof rumble_event);
     rumble_event.value = 0;
-    write(rumble_fd, &rumble_event, sizeof rumble_event);
+    write(dev_fd, &rumble_event, sizeof rumble_event);
 }
 
 static void set_led_state()
@@ -326,9 +326,8 @@ int main(int argc, char **argv)
     const char* device_name;
     const char* device_path;
     struct input_event event;
-    int dev_fd = -1;
+    int imu_fd = -1;
     int epoll_fd = -1;
-    bool is_imu;
 
     int i = 0;
     ssize_t read_result = 0;
@@ -371,15 +370,26 @@ int main(int argc, char **argv)
 	exit(1);
     }
 
-    is_imu = (strstr(device_name, "IMU") != NULL);
-
-    if ((dev_fd = open(device_path, O_RDONLY)) == -1)
+    if ((dev_fd = open(device_path, O_RDWR)) == -1)
     {
 	fprintf(stderr, "Could not open device node: %d\n", errno);
 	exit(1);
     }
 
-    if (is_imu)
+    struct ff_effect effect = { 0 };
+    effect.id = -1;
+    effect.type = FF_RUMBLE;
+    effect.u.rumble.strong_magnitude = USHRT_MAX / 2;
+    printf("Trying to add rumble effect...\n");
+    if (ioctl(dev_fd, EVIOCSFF, &effect) == -1)
+    {
+	fprintf(stderr, "Could not add rumble effect! %d %s\n", errno, strerror(errno));
+	exit (1);
+    }
+
+    rumble_effect_id = effect.id;
+    printf("Added rumble effect %d\n", rumble_effect_id);
+
     {
 	struct udev_enumerate* monitor;
 	struct udev_list_entry* dev_list;
@@ -423,65 +433,50 @@ int main(int argc, char **argv)
 	    exit (1);
 	}
 
-	const char* rumble_sys_path = NULL;
+	const char* imu_sys_path = NULL;
 	while (dev_list)
 	{
-	    rumble_sys_path = udev_list_entry_get_name(dev_list);
-	    if (strcmp(rumble_sys_path, argv[1]) == 0)
+	    imu_sys_path = udev_list_entry_get_name(dev_list);
+	    if (strcmp(imu_sys_path, argv[1]) == 0)
 	    {
 		printf("Found ourselves!\n");
-		rumble_sys_path = NULL;
+		imu_sys_path = NULL;
 	    }
 	    else
 	    {
-		printf("Found a potential rumble source: %s\n", rumble_sys_path);
+		printf("Found the IMU: %s\n", imu_sys_path);
 		break;
 	    }
 	    dev_list = udev_list_entry_get_next(dev_list);
 	}
 
-	if (rumble_sys_path == NULL)
+	if (imu_sys_path == NULL)
 	{
-	    fprintf(stderr, "Could not find any rumble sources.\n");
+	    fprintf(stderr, "Could not find IMU.\n");
 	    exit (1);
 	}
 
-	struct udev_device* rumble_device = udev_device_new_from_syspath(udev, rumble_sys_path);
+	struct udev_device* imu_device = udev_device_new_from_syspath(udev, imu_sys_path);
 
-	if (rumble_device == NULL)
+	if (imu_device == NULL)
 	{
-	    fprintf(stderr, "Unable to open rumble device from syspath. %s\n", strerror(errno));
+	    fprintf(stderr, "Unable to open IMU from syspath. %s\n", strerror(errno));
 	    exit (1);
 	}
 
-	const char* rumble_dev_path = udev_device_get_devnode(rumble_device);
+	const char* imu_dev_path = udev_device_get_devnode(imu_device);
 
-	rumble_fd = open(rumble_dev_path, O_WRONLY);
+	imu_fd = open(imu_dev_path, O_RDONLY);
 
-	if (rumble_fd == -1)
+	if (imu_fd == -1)
 	{
-	    fprintf(stderr, "Could not open the rumble source device. %s\n", strerror(errno));
+	    fprintf(stderr, "Could not open the IMU dev. %s\n", strerror(errno));
 	    exit (1);
 	}
-
-	struct ff_effect effect = { 0 };
-	effect.id = -1;
-	effect.type = FF_RUMBLE;
-	effect.u.rumble.strong_magnitude = USHRT_MAX / 2;
-	printf("Trying to add rumble effect...\n");
-	if (ioctl(rumble_fd, EVIOCSFF, &effect) == -1)
-	{
-	    fprintf(stderr, "Could not add rumble effect! %d %s\n", errno, strerror(errno));
-	    exit (1);
-	}
-
-	rumble_effect_id = effect.id;
-	printf("Added rumble effect %d\n", rumble_effect_id);
 
 	udev_enumerate_unref(monitor);
-	udev_device_unref(rumble_device);
+	udev_device_unref(imu_device);
     }
-    else
     {
 	struct udev_enumerate* monitor;
 	struct udev_list_entry* dev_list;
@@ -566,9 +561,17 @@ int main(int argc, char **argv)
     struct epoll_event epoll_event = { 0 };
     epoll_event.events = EPOLLIN;
     epoll_event.data.fd = dev_fd;
+
     if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, dev_fd, &epoll_event) == -1)
     {
 	fprintf(stderr, "Could not add device fd to epoll context: %d\n", errno);
+	exit(1);
+    }
+
+    epoll_event.data.fd = imu_fd;
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, imu_fd, &epoll_event) == -1)
+    {
+	fprintf(stderr, "Could not add imu fd to epoll context: %d\n", errno);
 	exit(1);
     }
 
@@ -630,15 +633,15 @@ int main(int argc, char **argv)
 	    break;
 	}
 
-	read_result = read(dev_fd, &event, sizeof event);
+	read_result = read(epoll_event.data.fd, &event, sizeof event);
 
 	if (read_result == -1)
 	{
-	    fprintf(stderr, "Error reading from device. %d\n", errno);
+	    fprintf(stderr, "Error reading from device. %s\n", strerror(errno));
 	    break;
 	}
 
-	bindings_found = find_matching_bindings(is_imu, event.type, event.code, binding_indices, sizeof binding_indices / sizeof binding_indices[0]);
+	bindings_found = find_matching_bindings(epoll_event.data.fd == imu_fd, event.type, event.code, binding_indices, sizeof binding_indices / sizeof binding_indices[0]);
 
 	for (i = 0; i < bindings_found; i++)
 	{
@@ -648,11 +651,6 @@ int main(int argc, char **argv)
 
 
     xcb_disconnect(c);
-
-    if (rumble_fd != -1)
-    {
-	close(rumble_fd);
-    }
 
     for (i = 0; i < 4; i++)
     {
