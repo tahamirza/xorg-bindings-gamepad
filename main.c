@@ -58,6 +58,7 @@ xcb_atom_t role_atom;
 int rumble_effect_id = -1;
 int rumble_fd = -1;
 int led_fd[4] = { -1, -1, -1, -1 };
+int cur_set = 1;
 
 struct key_binding_t
 {
@@ -74,6 +75,8 @@ struct key_binding_t
     xcb_keycode_t keycode;
     uint16_t keystate;
     bool rumble;
+    bool setnext;
+    bool setprev;
 };
 
 #include "config.gen.inc.c"
@@ -241,6 +244,17 @@ static void play_rumble()
     write(rumble_fd, &rumble_event, sizeof rumble_event);
 }
 
+static void set_led_state()
+{
+    for (int i = 0; i < 4; i++)
+    {
+	if (led_fd[i] != -1)
+	{
+	    write(led_fd[i], cur_set == i + 1 ? "1" : "0", 1);
+	}
+    }
+}
+
 static void fire_binding(struct key_binding_t* binding, bool first)
 {
     struct timespec curr_time;
@@ -258,7 +272,26 @@ static void fire_binding(struct key_binding_t* binding, bool first)
 	play_rumble();
     }
 
-    send_event_to_window_deep(screen->root, binding->window_class, binding->keycode, binding->keystate);
+    if (binding->setnext)
+    {
+	if (cur_set < 4)
+	{
+	    cur_set++;
+	    set_led_state();
+	}
+    }
+    else if (binding->setprev)
+    {
+	if (cur_set > 1)
+	{
+	    cur_set--;
+	    set_led_state();
+	}
+    }
+    else
+    {
+	send_event_to_window_deep(screen->root, binding->window_class, binding->keycode, binding->keystate);
+    }
 }
 
 static void fire_pending_bindings()
@@ -507,7 +540,8 @@ int main(int argc, char **argv)
 			exit (1);
 		    }
 
-		    write(led_fd[i], i == 0 ? "1" : "0", 1);
+		    //write(led_fd[i], i == 0 ? "1" : "0", 1);
+		    write(led_fd[i], "1", 1);
 		}
 	    }
 
@@ -515,9 +549,9 @@ int main(int argc, char **argv)
 	}
 
 	udev_enumerate_unref(monitor);
-
-	exit (0);
     }
+
+    set_led_state();
 
     if ((epoll_fd = epoll_create1(0)) == -1)
     {

@@ -32,7 +32,13 @@ BEGIN { print "struct key_binding_t bindings[] = {"; ind = 0 }
     print "\t.repeat_ms = " repeat ","
     print "\t.first_repeat_delay_ms = " delay ","
     print "\t.window_class = \"" class "\","
-    print "\t.keycode = " $2 ","
+    if ($2 == "setnext") {
+	print "\t.setnext = true,"
+    } else if ($2 == "setprev") {
+        print "\t.setprev = true,"
+    } else {
+        print "\t.keycode = " $2 ","
+    }
     if ($3)
 	print "\t.keystate = " $3 ","
     print "},"

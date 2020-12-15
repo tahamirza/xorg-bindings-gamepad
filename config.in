@@ -23,10 +23,10 @@ BTN_SELECT 47
 BTN_THUMBL 14
 # ctrl s
 BTN_Z 39 XCB_MOD_MASK_CONTROL
-# ]
-BTN_TR 35
-# [
-BTN_TR2 34
+
+BTN_TR setprev
+
+BTN_TR2 setnext
 
 deadzone 20000
 rumble off
