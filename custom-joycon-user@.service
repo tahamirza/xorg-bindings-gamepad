@@ -1,7 +1,7 @@
 [Service]
 ExecStart=/usr/local/bin/custom-joycon-serviced /%I
 Restart=on-failure
-RestartSec=30
+RestartSec=5
 
 [Unit]
 StartLimitInterval=200
