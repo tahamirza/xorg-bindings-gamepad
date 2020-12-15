@@ -23,7 +23,7 @@ BEGIN { print "struct key_binding_t bindings[] = {"; ind = 0 }
 
 /BTN/ {
     i = ind++
-    ctrls[ictrl]["EV_KEY"][$1][0] = i
+    ctrls[ictrl, "EV_KEY", $1, 0] = i
     print "// index " i
     print "// " $0
     print "{"
@@ -43,7 +43,7 @@ BEGIN { print "struct key_binding_t bindings[] = {"; ind = 0 }
 
 /ABS/ {
     i = ind++
-    ctrls[ictrl]["EV_ABS"][$1][$2] = i
+    ctrls[ictrl, "EV_ABS", $1, $2] = i
     print "// index " i
     print "// " $0
     print "{"
@@ -68,39 +68,13 @@ END {
 
     print "static int find_matching_bindings(int32_t ctrl, uint16_t type, uint16_t code, int32_t ret[2])"
     print "{"
-    print "\tswitch (ctrl)"
-    print "\t{"
-    for (c in ctrls) {
-	print "\tcase " c ":"
-	print "\t\tswitch (type)"
-	print "\t\t{"
-	for (t in ctrls[c]) {
-	    print "\t\tcase " t ":"
-	    print "\t\t\tswitch (code)"
-	    print "\t\t\t{"
-	    for (k in ctrls[c][t]) {
-		print "\t\t\tcase " k ":"
-		i = 0
-		for (b in ctrls[c][t][k]) {
-		    print "\t\t\t\tret[" i++ "] = " ctrls[c][t][k][b] ";"
-		}
-		print "\t\t\t\treturn " i ";"
-		print "\t\t\tbreak;"
-	    }
-	    print "\t\t\tdefault:"
-	    print "\t\t\tbreak;"
-	    print "\t\t\t}"
-	    print "\t\tbreak;"
-	}
-        print "\t\tdefault:"
-	print "\t\tbreak;"
-	print "\t\t}"
-	print "\tbreak;"
+    print "\tint num = 0;"
+    print ""
+    for (i in ctrls) {
+	split(i, c, SUBSEP)
+	print "\tif ( ctrl == " c[1] " && type == " c[2] " && code == " c[3] " ) ret[num++] = " ctrls[i] ";"
     }
-    print "\tdefault:"
-    print "\tbreak;"
-    print "\t}"
-
-    print "return 0;"
+    print ""
+    print "\treturn num;"
     print "}"
 }
