@@ -1,7 +1,0 @@
-ACTION!="add", GOTO="joycond_end"
-SUBSYSTEM!="input", GOTO="joycond_end"
-KERNEL!="event*", GOTO="joycond_end"
-
-ATTRS{id/vendor}=="057e", ATTRS{id/product}=="2006", TAG+="systemd", ENV{SYSTEMD_USER_WANTS}="custom-joycon-user@.service"
-
-LABEL="joycond_end"
