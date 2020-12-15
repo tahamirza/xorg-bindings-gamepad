@@ -77,6 +77,7 @@ struct key_binding_t
     bool rumble;
     bool setnext;
     bool setprev;
+    int set;
 };
 
 #include "config.gen.inc.c"
@@ -290,7 +291,10 @@ static void fire_binding(struct key_binding_t* binding, bool first)
     }
     else
     {
-	send_event_to_window_deep(screen->root, binding->window_class, binding->keycode, binding->keystate);
+	if (binding->set == cur_set || binding->set == 0)
+	{
+	    send_event_to_window_deep(screen->root, binding->window_class, binding->keycode, binding->keystate);
+	}
     }
 }
 
@@ -601,7 +605,7 @@ int main(int argc, char **argv)
 
     for(;;)
     {
-	int32_t binding_indices[2];
+	int32_t binding_indices[10];
 	int bindings_found;
 
 	fire_pending_bindings();
@@ -634,7 +638,7 @@ int main(int argc, char **argv)
 	    break;
 	}
 
-	bindings_found = find_matching_bindings(is_imu, event.type, event.code, binding_indices);
+	bindings_found = find_matching_bindings(is_imu, event.type, event.code, binding_indices, sizeof binding_indices / sizeof binding_indices[0]);
 
 	for (i = 0; i < bindings_found; i++)
 	{
