@@ -57,6 +57,7 @@ const char* role_atom_name = "WM_WINDOW_ROLE";
 xcb_atom_t role_atom;
 int rumble_effect_id = -1;
 int rumble_fd = -1;
+int led_fd[4] = { -1, -1, -1, -1 };
 
 struct key_binding_t
 {
@@ -443,6 +444,80 @@ int main(int argc, char **argv)
 	udev_enumerate_unref(monitor);
 	udev_device_unref(rumble_device);
     }
+    else
+    {
+	struct udev_enumerate* monitor;
+	struct udev_list_entry* dev_list;
+
+	monitor = udev_enumerate_new(udev);
+
+	printf("Trying to open leds...\n");
+	monitor = udev_enumerate_new(udev);
+	if (monitor == NULL)
+	{
+	    fprintf(stderr, "Could not open udev monitor.\n");
+	    exit (1);
+	}
+
+	if (udev_enumerate_add_match_parent(monitor, udev_device_get_parent(udev_device_get_parent(device))) < 0)
+	{
+	    fprintf(stderr, "Could not add udev match for parent's parent.\n");
+	    exit (1);
+	}
+
+	if (udev_enumerate_add_match_subsystem(monitor, "leds") < 0)
+	{
+	    fprintf(stderr, "Could not add udev match for leds subsystem.\n");
+	    exit (1);
+	}
+
+	if (udev_enumerate_scan_devices(monitor) < 0)
+	{
+	    fprintf(stderr, "Device scan failed.\n");
+	    exit (1);
+	}
+
+	dev_list = udev_enumerate_get_list_entry(monitor);
+
+	if (dev_list == NULL)
+	{
+	    fprintf(stderr, "Device scan returned no devices.\n");
+	    exit (1);
+	}
+
+	while (dev_list)
+	{
+	    const char* led_path = udev_list_entry_get_name(dev_list);
+
+	    for (i = 0; i < 4; i++)
+	    {
+		char name[] = "playerx";
+		name[6] = '0' + i + 1;
+
+		if (strstr(led_path, name))
+		{
+		    char brightness_path[PATH_MAX];
+		    snprintf(brightness_path, sizeof brightness_path, "%s/%s", led_path, "brightness");
+		    printf("opening: %s\n", brightness_path);
+
+		    led_fd[i] = open(brightness_path, O_WRONLY);
+		    if (led_fd[i] == -1)
+		    {
+			fprintf(stderr, "Could not open led. %d\n", errno);
+			exit (1);
+		    }
+
+		    write(led_fd[i], i == 0 ? "1" : "0", 1);
+		}
+	    }
+
+	    dev_list = udev_list_entry_get_next(dev_list);
+	}
+
+	udev_enumerate_unref(monitor);
+
+	exit (0);
+    }
 
     if ((epoll_fd = epoll_create1(0)) == -1)
     {
@@ -539,6 +614,14 @@ int main(int argc, char **argv)
     if (rumble_fd != -1)
     {
 	close(rumble_fd);
+    }
+
+    for (i = 0; i < 4; i++)
+    {
+	if (led_fd[i] != -1)
+	{
+	    close(led_fd[i]);
+	}
     }
 
     close(epoll_fd);
