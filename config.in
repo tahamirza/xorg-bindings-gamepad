@@ -16,9 +16,10 @@ BTN_THUMBL 14
 # ctrl s
 BTN_Z 39 XCB_MOD_MASK_CONTROL
 
+rumble on
 BTN_TR setprev
-
 BTN_TR2 setnext
+rumble off
 
 deadzone 20000
 rumble off
@@ -46,6 +47,10 @@ set 2
 BTN_DPAD_UP 112
 # pgdown
 BTN_DPAD_DOWN 117
+# ]
+BTN_DPAD_RIGHT 35
+# [
+BTN_DPAD_LEFT 34
 
 ctrl imu
 class gwenview

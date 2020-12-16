@@ -42,6 +42,8 @@ BEGIN { print "struct key_binding_t bindings[] = {"; ind = 0 }
     }
     if ($3)
 	print "\t.keystate = " $3 ","
+    if (rumble == "on")
+	print "\t.rumble = true,"
     print "},"
 }
 
@@ -50,7 +52,7 @@ BEGIN { print "struct key_binding_t bindings[] = {"; ind = 0 }
 
 /^ABS/ {
     i = ind++
-    ctrls[ictrl, "EV_ABS", $1, $2] = i
+    ctrls[ictrl, "EV_ABS", $1, set, $2] = i
     print "// index " i
     print "// " $0
     print "{"
@@ -59,6 +61,7 @@ BEGIN { print "struct key_binding_t bindings[] = {"; ind = 0 }
     print "\t.repeat_ms = " repeat ","
     print "\t.first_repeat_delay_ms = " delay ","
     print "\t.window_class = \"" class "\","
+    print "\t.set = " set ","
     print "\t.keycode = " $3 ","
     if ($4)
 	print "\t.keystate = " $4 ","
