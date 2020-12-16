@@ -82,6 +82,65 @@ struct key_binding_t
 
 #include "config.gen.inc.c"
 
+static xcb_keycode_t get_keycode_for_modifier(int mod)
+{
+    if (mod == XCB_MOD_MASK_CONTROL) return 0x25;
+    if (mod == XCB_MOD_MASK_SHIFT) return 0x32;
+    if (mod == XCB_MOD_MASK_1) return 0x40;
+
+    return 0;
+}
+
+static void send_keycode_to_window(xcb_window_t win, xcb_keycode_t keycode, uint16_t keystate, bool pressed)
+{
+    xcb_key_press_event_t event = { 0 };
+    event.response_type = pressed ? XCB_KEY_PRESS : XCB_KEY_RELEASE;
+    event.root = win;
+    event.event = win;
+    event.same_screen = 1;
+
+    uint16_t sent_state = pressed ? 0 : keystate;
+
+    if (!pressed)
+    {
+	event.state = sent_state;
+	event.detail = keycode;
+	xcb_send_event(c, 0, win, XCB_EVENT_MASK_KEY_RELEASE, (char*)&event);
+    }
+
+    for (int i = 1; i <= XCB_MOD_MASK_1; i = i << 1)
+    {
+	int mod_code = 0;
+	if (keystate & i)
+	{
+	    mod_code = get_keycode_for_modifier(i);
+	}
+
+	if (mod_code)
+	{
+	    event.detail = mod_code;
+	    event.state = sent_state;
+	    xcb_send_event(c, 0, win, pressed ? XCB_EVENT_MASK_KEY_PRESS : XCB_EVENT_MASK_KEY_RELEASE, (char*)&event);
+
+	    if (pressed)
+	    {
+		sent_state |= i;
+	    }
+	    else
+	    {
+		sent_state &= ~i;
+	    }
+	}
+    }
+
+    if (pressed)
+    {
+	event.state = sent_state;
+	event.detail = keycode;
+	xcb_send_event(c, 0, win, XCB_EVENT_MASK_KEY_PRESS, (char*)&event);
+    }
+}
+
 static void send_event_to_window_deep(xcb_window_t win, const char* class, xcb_keycode_t keycode, uint16_t keystate)
 {
     const int class_len = strlen(class);
@@ -119,18 +178,8 @@ static void send_event_to_window_deep(xcb_window_t win, const char* class, xcb_k
 
     if (has_class && has_role)
     {
-	xcb_key_press_event_t event = { 0 };
-	event.response_type = XCB_KEY_PRESS;
-	event.detail = keycode;
-	event.root = win;
-	event.event = win;
-	event.state = keystate;
-	event.same_screen = 1;
-
-	xcb_send_event(c, 0, win, XCB_EVENT_MASK_KEY_PRESS, (char*)&event);
-
-	event.response_type = XCB_KEY_RELEASE;
-	xcb_send_event(c, 0, win, XCB_EVENT_MASK_KEY_RELEASE, (char*)&event);
+	send_keycode_to_window(win, keycode, keystate, true);
+	send_keycode_to_window(win, keycode, keystate, false);
     }
 
     if ((query_reply = xcb_query_tree_reply(c, query_cookie, NULL)))
